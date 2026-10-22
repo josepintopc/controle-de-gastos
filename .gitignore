@@ -1,0 +1,10 @@
+# Dados reais e segredos: nunca vao para o GitHub
+gastos.csv
+gastos.bak.csv
+config.json
+files.zip
+.streamlit/secrets.toml
+supabase/.mcp_token
+
+__pycache__/
+supabase/.temp/

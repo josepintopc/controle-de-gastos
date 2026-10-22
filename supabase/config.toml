@@ -1,0 +1,6 @@
+# Configuracao minima para o Supabase CLI (supabase functions deploy).
+# O conector valida o token proprio na URL, entao o JWT do Supabase fica desligado.
+project_id = "controle-de-gastos"
+
+[functions.gastos-mcp]
+verify_jwt = false

@@ -1,0 +1,40 @@
+{
+  "categorias": [
+    "Moradia", "Alimentação", "Assinaturas", "Transporte", "Cartão de Crédito",
+    "Lazer", "Saúde", "Educação", "Imprevistos", "Outros"
+  ],
+  "pagamentos": ["Débito/Pix", "Cartão de crédito", "Dinheiro", "Boleto"],
+  "palavras_chave": {
+    "Assinaturas": [
+      "assinatura", "netflix", "spotify", "prime video", "amazon prime", "youtube premium",
+      "disney", "hbo", "globoplay", "deezer", "icloud", "google one", "chatgpt", "claude", "paramount"
+    ],
+    "Saúde": [
+      "farmacia", "drogaria", "drogasil", "pague menos", "remedio", "medico", "consulta", "exame",
+      "dentista", "unimed", "plano de saude", "hospital", "psicologo", "terapia", "academia", "fisioterapia"
+    ],
+    "Educação": [
+      "faculdade", "curso", "escola", "livro", "livraria", "material escolar", "mensalidade",
+      "apostila", "udemy", "alura"
+    ],
+    "Moradia": [
+      "aluguel", "condominio", "energia", "luz", "agua", "internet", "gas", "iptu", "diarista",
+      "faxina", "manutencao", "moveis", "eletricista", "encanador"
+    ],
+    "Transporte": [
+      "uber", "99", "taxi", "gasolina", "combustivel", "etanol", "posto", "estacionamento",
+      "pedagio", "onibus", "metro", "oficina", "mecanico", "ipva", "licenciamento", "lava jato"
+    ],
+    "Alimentação": [
+      "mercado", "supermercado", "ifood", "rappi", "padaria", "restaurante", "lanche", "lanchonete",
+      "almoco", "jantar", "cafe", "acougue", "hortifruti", "feira", "pizza", "hamburguer", "delivery",
+      "sorvete", "marmita", "atacadao", "assai"
+    ],
+    "Lazer": [
+      "cinema", "bar", "show", "ingresso", "viagem", "hotel", "passeio", "festa", "teatro",
+      "jogo", "steam", "parque", "balada", "cerveja", "presente"
+    ],
+    "Imprevistos": ["conserto", "multa", "emergencia", "imprevisto", "guincho"],
+    "Cartão de Crédito": ["fatura", "cartao"]
+  }
+}
