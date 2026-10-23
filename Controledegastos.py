@@ -28,6 +28,7 @@ import streamlit as st
 # --------------------------------------------------------------------------
 st.set_page_config(page_title="Controle de Gastos", page_icon="🟡", layout="wide")
 
+import acesso  # noqa: E402
 import armazenamento  # noqa: E402 - le st.secrets, precisa vir depois do set_page_config
 
 COLUMNS = ["Data", "Descrição", "Categoria", "Valor", "Pagamento"]
@@ -216,6 +217,9 @@ st.markdown(
 # --------------------------------------------------------------------------
 # Dados e barra lateral
 # --------------------------------------------------------------------------
+# Barra quem nao esta autorizado antes de carregar qualquer dado (veja acesso.py)
+pode_editar = acesso.verificar_acesso()
+
 df = carregar_dados()
 cfg = carregar_config()
 hoje = dt.datetime.now(FUSO).date()
@@ -235,10 +239,12 @@ with st.sidebar:
     st.markdown("### Seus números")
     salario = st.number_input(
         "Salário líquido (R$)", min_value=0.0, value=float(cfg["salario"]), step=100.0,
-        format="%.2f", help="O que cai na sua conta por mês, já com os descontos.")
+        format="%.2f", disabled=not pode_editar,
+        help="O que cai na sua conta por mês, já com os descontos.")
     meta = st.number_input(
         "Meta de economia mensal (R$)", min_value=0.0, value=float(cfg["meta"]), step=100.0,
-        format="%.2f", help="Quanto você quer guardar por mês. A barra do painel mostra o progresso.")
+        format="%.2f", disabled=not pode_editar,
+        help="Quanto você quer guardar por mês. A barra do painel mostra o progresso.")
     if meta > salario > 0:
         st.warning("Sua meta é maior que o salário — ela não poderá ser atingida.")
 
@@ -249,70 +255,75 @@ with st.sidebar:
         for cat in CATEGORIAS:
             limites[cat] = st.number_input(
                 cat, min_value=0.0, value=float(cfg["limites"].get(cat, 0.0)),
-                step=50.0, format="%.2f", key=f"lim_{cat}")
+                step=50.0, format="%.2f", key=f"lim_{cat}", disabled=not pode_editar)
 
-    if salario != cfg["salario"] or meta != cfg["meta"] or limites != cfg["limites"]:
+    if pode_editar and (salario != cfg["salario"] or meta != cfg["meta"] or limites != cfg["limites"]):
         cfg = {"salario": salario, "meta": meta, "limites": limites}
         salvar_config(cfg)
 
-    st.markdown("### Novo gasto")
-    with st.form("novo_gasto", clear_on_submit=True):
-        f_data = st.date_input("Data", value=hoje, format="DD/MM/YYYY")
-        f_desc = st.text_input("Descrição", placeholder="Ex.: Mercado, Uber, Netflix")
-        f_cat = st.selectbox("Categoria", ["Automática"] + CATEGORIAS,
-                             help="Automática: escolhe a categoria pela descrição (ex.: Uber → Transporte).")
-        f_valor = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f")
-        f_pag = st.selectbox("Pagamento", PAGAMENTOS)
-        enviar = st.form_submit_button("Adicionar", width="stretch")
-    if enviar:
-        if f_valor <= 0 or not f_desc.strip():
-            st.warning("Preencha a descrição e um valor maior que zero.")
-        else:
-            if f_cat == "Automática":
-                f_cat = armazenamento.classificar(f_desc)
-            repetido = ((df["Data"] == pd.Timestamp(f_data)) & (df["Valor"] == f_valor)
-                        & (df["Descrição"].str.lower() == f_desc.strip().lower())).any()
-            novo = pd.DataFrame([[pd.Timestamp(f_data), f_desc.strip(), f_cat, f_valor, f_pag]],
-                                columns=COLUMNS)
-            adicionar_gasto(df, novo)
-            st.session_state.versao_editor += 1
-            st.session_state.aviso_pos = (
-                "Atenção: já existia um gasto idêntico (mesma data, descrição e valor). "
-                "Se foi sem querer, apague um deles na aba Lançamentos." if repetido else None)
-            st.toast(f"Adicionado: {f_desc.strip()} — {brl(f_valor)} ({f_cat})",
-                     icon=":material/check_circle:")
-            st.rerun()
+    if not pode_editar:
+        st.info("Modo somente leitura.", icon=":material/visibility:")
 
-    with st.expander("Importar da planilha Excel"):
-        st.caption("Use o arquivo Controle_de_Gastos.xlsx (aba Lançamentos). "
-                   "Isso **substitui** todos os dados atuais do app.")
-        arquivo = st.file_uploader("Arquivo .xlsx", type="xlsx")
-        if arquivo is not None:
-            try:
-                bruto = pd.read_excel(arquivo, sheet_name="Lançamentos", header=3, usecols="A:E")
-                bruto = bruto.rename(columns={"Valor (R$)": "Valor",
-                                              "Forma de pagamento": "Pagamento"})
-                importado = normalizar(bruto).dropna(subset=["Data"])
-                st.info(f"Encontrei {len(importado)} lançamentos, somando {brl(importado['Valor'].sum())}. "
-                        f"Hoje o app tem {len(df)}.")
-                ok = st.checkbox("Entendo que os dados atuais serão substituídos")
-                if st.button("Importar e substituir", disabled=not ok):
-                    salvar_dados(importado)
-                    st.session_state.versao_editor += 1
-                    st.toast(f"{len(importado)} lançamentos importados!", icon=":material/check_circle:")
-                    st.rerun()
-            except Exception as erro:  # noqa: BLE001
-                st.error(f"Não consegui ler a planilha. Confira se ela tem a aba 'Lançamentos'. Detalhe: {erro}")
-
-    if armazenamento.tem_backup():
-        with st.expander("Desfazer"):
-            st.caption("Volta os dados para a versão anterior à última alteração "
-                       "(inclusive um gasto lançado pelo Claude).")
-            if st.button("Desfazer última alteração", icon=":material/undo:"):
-                armazenamento.desfazer()
+    # Lancar, importar e desfazer: so para quem pode alterar os dados
+    if pode_editar:
+        st.markdown("### Novo gasto")
+        with st.form("novo_gasto", clear_on_submit=True):
+            f_data = st.date_input("Data", value=hoje, format="DD/MM/YYYY")
+            f_desc = st.text_input("Descrição", placeholder="Ex.: Mercado, Uber, Netflix")
+            f_cat = st.selectbox("Categoria", ["Automática"] + CATEGORIAS,
+                                 help="Automática: escolhe a categoria pela descrição (ex.: Uber → Transporte).")
+            f_valor = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f")
+            f_pag = st.selectbox("Pagamento", PAGAMENTOS)
+            enviar = st.form_submit_button("Adicionar", width="stretch")
+        if enviar:
+            if f_valor <= 0 or not f_desc.strip():
+                st.warning("Preencha a descrição e um valor maior que zero.")
+            else:
+                if f_cat == "Automática":
+                    f_cat = armazenamento.classificar(f_desc)
+                repetido = ((df["Data"] == pd.Timestamp(f_data)) & (df["Valor"] == f_valor)
+                            & (df["Descrição"].str.lower() == f_desc.strip().lower())).any()
+                novo = pd.DataFrame([[pd.Timestamp(f_data), f_desc.strip(), f_cat, f_valor, f_pag]],
+                                    columns=COLUMNS)
+                adicionar_gasto(df, novo)
                 st.session_state.versao_editor += 1
-                st.toast("Última alteração desfeita.", icon=":material/undo:")
+                st.session_state.aviso_pos = (
+                    "Atenção: já existia um gasto idêntico (mesma data, descrição e valor). "
+                    "Se foi sem querer, apague um deles na aba Lançamentos." if repetido else None)
+                st.toast(f"Adicionado: {f_desc.strip()} — {brl(f_valor)} ({f_cat})",
+                         icon=":material/check_circle:")
                 st.rerun()
+
+        with st.expander("Importar da planilha Excel"):
+            st.caption("Use o arquivo Controle_de_Gastos.xlsx (aba Lançamentos). "
+                       "Isso **substitui** todos os dados atuais do app.")
+            arquivo = st.file_uploader("Arquivo .xlsx", type="xlsx")
+            if arquivo is not None:
+                try:
+                    bruto = pd.read_excel(arquivo, sheet_name="Lançamentos", header=3, usecols="A:E")
+                    bruto = bruto.rename(columns={"Valor (R$)": "Valor",
+                                                  "Forma de pagamento": "Pagamento"})
+                    importado = normalizar(bruto).dropna(subset=["Data"])
+                    st.info(f"Encontrei {len(importado)} lançamentos, somando {brl(importado['Valor'].sum())}. "
+                            f"Hoje o app tem {len(df)}.")
+                    ok = st.checkbox("Entendo que os dados atuais serão substituídos")
+                    if st.button("Importar e substituir", disabled=not ok):
+                        salvar_dados(importado)
+                        st.session_state.versao_editor += 1
+                        st.toast(f"{len(importado)} lançamentos importados!", icon=":material/check_circle:")
+                        st.rerun()
+                except Exception as erro:  # noqa: BLE001
+                    st.error(f"Não consegui ler a planilha. Confira se ela tem a aba 'Lançamentos'. Detalhe: {erro}")
+
+        if armazenamento.tem_backup():
+            with st.expander("Desfazer"):
+                st.caption("Volta os dados para a versão anterior à última alteração "
+                           "(inclusive um gasto lançado pelo Claude).")
+                if st.button("Desfazer última alteração", icon=":material/undo:"):
+                    armazenamento.desfazer()
+                    st.session_state.versao_editor += 1
+                    st.toast("Última alteração desfeita.", icon=":material/undo:")
+                    st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -544,9 +555,12 @@ with aba_orc:
 # ---- Lancamentos ----------------------------------------------------------
 with aba_lanc:
     st.markdown(f"**Lançamentos de {mes_nome} de {ano}**")
-    modo = st.segmented_control("Modo", ["Editar", "Filtrar e consultar"], default="Editar",
-                                label_visibility="collapsed",
-                                help="Editar: altera a tabela do mês. Filtrar: só consulta, sem risco de mudar nada.")
+    if pode_editar:
+        modo = st.segmented_control("Modo", ["Editar", "Filtrar e consultar"], default="Editar",
+                                    label_visibility="collapsed",
+                                    help="Editar: altera a tabela do mês. Filtrar: só consulta, sem risco de mudar nada.")
+    else:
+        modo = "Filtrar e consultar"
 
     if modo == "Filtrar e consultar":
         st.caption("Modo somente leitura: use os filtros para encontrar gastos específicos.")

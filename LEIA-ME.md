@@ -15,6 +15,7 @@ Navegador (celular/PC) ──► dashboard Streamlit (Streamlit Cloud) ───
 |---|---|
 | `Controledegastos.py` | Dashboard (o mesmo de antes; o formulário ganhou a categoria "Automática") |
 | `armazenamento.py` | Decide entre CSV local e Supabase; classificação automática de categoria |
+| `acesso.py` | Login Google e lista de e-mails autorizados (donos e leitores) |
 | `supabase/migrations/…sql` | Tabelas `gastos`, `backup` e `config`, e as funções de salvar, inserir e desfazer |
 | `supabase/functions/gastos-mcp/` | Conector MCP do Claude (`registrar_gasto`, `listar_gastos`) |
 | `supabase/functions/gastos-mcp/categorias.json` | Categorias e palavras-chave, usadas pelo conector **e** pelo app |
@@ -75,6 +76,39 @@ Crie um repositório **privado** em <https://github.com/new> e siga as instruç�
    ```
 3. Ele aparece também no app do celular. Numa conversa, ative o conector (ícone de ferramentas) ou crie um **Projeto "Gastos"** com ele ligado e a instrução: *"Quando eu disser um gasto, registre com o conector Controle de Gastos."*
 4. Use assim: *"gastei 45 no ifood no crédito"*, *"uber 23,50 ontem"*, *"quanto já gastei com mercado este mês?"*
+
+## Segurança: quem pode ver o app
+São três travas. Os dados só aparecem para quem passa por todas:
+1. **Streamlit Cloud privado.** Em ⋮ → Settings → Sharing, o app fica restrito a *Only specific people*.
+2. **Google em modo "Em teste".** Só os "usuários de teste" cadastrados na tela de consentimento OAuth conseguem fazer login.
+3. **Lista do próprio app.** O `acesso.py` só libera os e-mails da seção `[acesso]` nos Secrets:
+   - `donos` veem e alteram tudo;
+   - `leitores` só veem: não lançam, não editam, não importam e não desfazem.
+
+**Autorizar alguém (como leitor):**
+1. Adicione o e-mail Google da pessoa em `leitores`, nos Secrets do app (Streamlit Cloud → app → Settings → Secrets).
+2. Adicione o mesmo e-mail como *usuário de teste* no Google Cloud (Tela de consentimento OAuth).
+3. Convide a pessoa em **Share** no Streamlit Cloud. O plano gratuito permite convidar viewers no app privado.
+
+**Remover o acesso de alguém:** faça o inverso nos três lugares. Basta tirar a pessoa de um deles para ela já não ver os dados.
+
+**Login Google (configuração única):**
+1. Em <https://console.cloud.google.com>, crie o projeto `controle-de-gastos`.
+2. Em **APIs e serviços → Tela de consentimento OAuth**: tipo *Externo*, status **Em teste**, com você em *usuários de teste*.
+3. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, escolha *Aplicativo da Web* e cadastre os redirecionamentos `https://SEU-APP.streamlit.app/oauth2callback` e `http://localhost:8501/oauth2callback`.
+4. Preencha `[auth]`, `[auth.google]` e `[acesso]` nos Secrets, seguindo o modelo em `.streamlit/secrets.toml.example`.
+
+**Senhas do sistema:** trate como senha:
+- a **URL do conector do Claude**: quem tiver o link consegue ler e lançar gastos;
+- a chave **service_role**;
+- o **client_secret** do Google.
+
+Se a URL do conector vazar:
+1. Gere outro token com `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+2. Troque o `MCP_TOKEN` no painel do Supabase (Edge Functions → Secrets).
+3. Atualize a URL no claude.ai.
+
+Ative a **verificação em duas etapas** no GitHub, no Google e no Supabase.
 
 ## Como a categoria é escolhida
 1. O próprio Claude escolhe entre as 10 categorias do app a partir da frase.
