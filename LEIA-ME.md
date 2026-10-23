@@ -65,7 +65,7 @@ Crie um repositório **privado** em <https://github.com/new> e siga as instruç�
 3. Depois de publicado: **Share** → deixe o app **privado** e adicione só o seu e-mail.
 4. No celular, abra o link e use **"Adicionar à tela inicial"** para ele virar um ícone.
 
-> Se o app não abrir no Cloud, apague o bloco `[server]` de `.streamlit/config.toml` (o `address = "localhost"` é só para uso no PC) e faça um novo commit.
+> O `.streamlit/config.toml` do projeto não tem `[server]`: no Cloud, `address = "localhost"` impede o app de iniciar. No PC essa restrição fica em `%USERPROFILE%\.streamlit\config.toml`.
 
 ### 5. Conector no Claude
 1. Em <https://claude.ai> → **Configurações → Conectores → Adicionar conector personalizado**.

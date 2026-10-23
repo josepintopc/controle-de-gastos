@@ -6,6 +6,5 @@ secondaryBackgroundColor = "#141414"
 textColor = "#F5F5F5"
 font = "sans serif"
 
-[server]
-headless = false
-address = "localhost"
+# Sem [server] aqui: no Streamlit Cloud, address = "localhost" impede o app de iniciar.
+# No PC, o acesso so pela propria maquina vem de %USERPROFILE%\.streamlit\config.toml.
