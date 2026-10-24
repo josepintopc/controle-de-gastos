@@ -3,6 +3,8 @@
 //
 // URL para colar no claude.ai (Conectores > Adicionar conector personalizado):
 //   https://<projeto>.supabase.co/functions/v1/gastos-mcp/<MCP_TOKEN>/mcp
+// Com MCP_TOKEN_LANCAR no lugar de MCP_TOKEN, o conector so registra gastos
+// (sem listar_gastos e sem totais na confirmacao), para outra pessoa lancar.
 import { Hono } from 'hono'
 import { McpServer, StreamableHttpTransport } from 'mcp-lite'
 import { z } from 'zod'
@@ -91,11 +93,15 @@ function texto(t: string) {
 // --------------------------------------------------------------------------
 // Ferramentas
 // --------------------------------------------------------------------------
-const mcp = new McpServer({
-  name: 'controle-de-gastos',
-  version: '1.0.0',
-  schemaAdapter: (schema) => z.toJSONSchema(schema as z.ZodType),
-})
+function novoServidor(): McpServer {
+  return new McpServer({
+    name: 'controle-de-gastos',
+    version: '1.0.0',
+    schemaAdapter: (schema) => z.toJSONSchema(schema as z.ZodType),
+  })
+}
+
+const mcp = novoServidor()
 
 const RegistrarGasto = z.object({
   descricao: z.string().min(1)
@@ -109,40 +115,44 @@ const RegistrarGasto = z.object({
     .describe('Forma de pagamento. "crédito"/"cartão" = Cartão de crédito; "pix"/"débito" = Débito/Pix. Omita se não for dito (vira Débito/Pix).'),
 })
 
+const DESCRICAO_REGISTRAR =
+  'Registra um gasto no Controle de Gastos do usuário. Use sempre que ele contar que gastou/pagou/comprou algo ' +
+  '(ex.: "gastei 45 no ifood no crédito", "uber 23,50", "farmácia 32,90 ontem"). ' +
+  'Extraia descrição, valor, categoria, data e pagamento da frase. Registre um gasto por chamada; ' +
+  'se a frase tiver vários gastos, chame a ferramenta uma vez para cada um. '
+
+/** Grava o gasto; com `completo`, a resposta traz tambem o total do mes e o alerta de limite. */
+async function registrar(args: z.infer<typeof RegistrarGasto>, completo: boolean) {
+  const descricao = args.descricao.trim()
+  const categoria = args.categoria ?? classificar(descricao)
+  const data = args.data ?? hojeBrasilia()
+  const pagamento = args.pagamento ?? 'Débito/Pix'
+
+  const { error } = await supabase.rpc('inserir_gasto', {
+    p_data: data, p_descricao: descricao, p_categoria: categoria,
+    p_valor: args.valor, p_pagamento: pagamento,
+  })
+  if (error) return texto(`Não consegui registrar o gasto: ${error.message}`)
+
+  const [a, m, d] = data.split('-')
+  const registrado = `Registrado: ${descricao} | ${brl(args.valor)} | ${categoria} | ${pagamento} | ${d}/${m}/${a}.`
+  if (!completo) return texto(registrado)
+
+  const [ano, mes] = data.split('-').map(Number)
+  const doMes = await gastosDoMes(ano, mes)
+  const total = doMes.reduce((s, g) => s + g.valor, 0)
+  const naCategoria = doMes.filter((g) => g.categoria === categoria).reduce((s, g) => s + g.valor, 0)
+  const alerta = alertaDeLimite(categoria, naCategoria, (await limites())[categoria] ?? 0)
+
+  const linhas = [registrado, `Total de ${MESES[mes - 1]}: ${brl(total)} (${categoria}: ${brl(naCategoria)}).`]
+  if (alerta) linhas.push(alerta)
+  return texto(linhas.join('\n'))
+}
+
 mcp.tool('registrar_gasto', {
-  description:
-    'Registra um gasto no Controle de Gastos do usuário. Use sempre que ele contar que gastou/pagou/comprou algo ' +
-    '(ex.: "gastei 45 no ifood no crédito", "uber 23,50", "farmácia 32,90 ontem"). ' +
-    'Extraia descrição, valor, categoria, data e pagamento da frase. Registre um gasto por chamada; ' +
-    'se a frase tiver vários gastos, chame a ferramenta uma vez para cada um. ' +
-    'Depois, confirme ao usuário o que foi lançado e repita qualquer alerta de limite.',
+  description: DESCRICAO_REGISTRAR + 'Depois, confirme ao usuário o que foi lançado e repita qualquer alerta de limite.',
   inputSchema: RegistrarGasto,
-  handler: async (args: z.infer<typeof RegistrarGasto>) => {
-    const descricao = args.descricao.trim()
-    const categoria = args.categoria ?? classificar(descricao)
-    const data = args.data ?? hojeBrasilia()
-    const pagamento = args.pagamento ?? 'Débito/Pix'
-
-    const { error } = await supabase.rpc('inserir_gasto', {
-      p_data: data, p_descricao: descricao, p_categoria: categoria,
-      p_valor: args.valor, p_pagamento: pagamento,
-    })
-    if (error) return texto(`Não consegui registrar o gasto: ${error.message}`)
-
-    const [ano, mes] = data.split('-').map(Number)
-    const doMes = await gastosDoMes(ano, mes)
-    const total = doMes.reduce((s, g) => s + g.valor, 0)
-    const naCategoria = doMes.filter((g) => g.categoria === categoria).reduce((s, g) => s + g.valor, 0)
-    const alerta = alertaDeLimite(categoria, naCategoria, (await limites())[categoria] ?? 0)
-
-    const [a, m, d] = data.split('-')
-    const linhas = [
-      `Registrado: ${descricao} | ${brl(args.valor)} | ${categoria} | ${pagamento} | ${d}/${m}/${a}.`,
-      `Total de ${MESES[mes - 1]}: ${brl(total)} (${categoria}: ${brl(naCategoria)}).`,
-    ]
-    if (alerta) linhas.push(alerta)
-    return texto(linhas.join('\n'))
-  },
+  handler: (args: z.infer<typeof RegistrarGasto>) => registrar(args, true),
 })
 
 const ListarGastos = z.object({
@@ -181,16 +191,29 @@ mcp.tool('listar_gastos', {
   },
 })
 
+// Servidor reduzido para quem so lanca gastos: nao lista nem mostra totais
+const mcpLancar = novoServidor()
+
+mcpLancar.tool('registrar_gasto', {
+  description: DESCRICAO_REGISTRAR + 'Depois, confirme ao usuário o que foi lançado.',
+  inputSchema: RegistrarGasto,
+  handler: (args: z.infer<typeof RegistrarGasto>) => registrar(args, false),
+})
+
 // --------------------------------------------------------------------------
 // HTTP: so responde quando o token secreto da URL confere
 // --------------------------------------------------------------------------
-const httpHandler = new StreamableHttpTransport().bind(mcp)
+const httpCompleto = new StreamableHttpTransport().bind(mcp)
+const httpLancar = new StreamableHttpTransport().bind(mcpLancar)
 const app = new Hono()
 
 app.all('/gastos-mcp/:token/mcp', async (c) => {
-  const esperado = Deno.env.get('MCP_TOKEN')
-  if (!esperado || c.req.param('token') !== esperado) return c.notFound()
-  return await httpHandler(c.req.raw)
+  const token = c.req.param('token')
+  const completo = Deno.env.get('MCP_TOKEN')
+  const lancar = Deno.env.get('MCP_TOKEN_LANCAR')
+  if (completo && token === completo) return await httpCompleto(c.req.raw)
+  if (lancar && token === lancar) return await httpLancar(c.req.raw)
+  return c.notFound()
 })
 
 app.all('*', (c) => c.notFound())

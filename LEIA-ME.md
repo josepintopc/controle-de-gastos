@@ -110,6 +110,20 @@ Se a URL do conector vazar:
 
 Ative a **verificação em duas etapas** no GitHub, no Google e no Supabase.
 
+## Outra pessoa lançando pelo Claude dela
+O conector aceita um segundo token, `MCP_TOKEN_LANCAR`, só para **lançar**. Com ele, o Claude da pessoa vê apenas `registrar_gasto`: ela não consulta os gastos do mês, e a confirmação não mostra totais nem alertas de limite.
+
+1. O token fica em `supabase/.mcp_token_lancar`, que está no `.gitignore`. Para gerar um novo:
+   ```powershell
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+2. No painel do Supabase, em Edge Functions → Secrets, cadastre `MCP_TOKEN_LANCAR` com esse valor.
+3. Envie à pessoa, por um canal privado, a URL:
+   `https://<ref-do-projeto>.supabase.co/functions/v1/gastos-mcp/<MCP_TOKEN_LANCAR>/mcp`
+4. Ela adiciona a URL em claude.ai → Configurações → Conectores → **Adicionar conector personalizado** e ativa o conector na conversa.
+
+**Para cortar o acesso dela:** apague ou troque o `MCP_TOKEN_LANCAR` no painel. O seu token (`MCP_TOKEN`) continua funcionando.
+
 ## Como a categoria é escolhida
 1. O próprio Claude escolhe entre as 10 categorias do app a partir da frase.
 2. Se ele não mandar categoria, o conector procura palavras-chave da descrição em `categorias.json` (ex.: *uber* → Transporte, *farmácia* → Saúde).

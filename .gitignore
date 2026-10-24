@@ -5,6 +5,7 @@ config.json
 files.zip
 .streamlit/secrets.toml
 supabase/.mcp_token
+supabase/.mcp_token_lancar
 
 __pycache__/
 supabase/.temp/
