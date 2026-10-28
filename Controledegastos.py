@@ -127,7 +127,8 @@ def carregar_dados() -> pd.DataFrame:
 
 
 def carregar_config() -> dict:
-    padrao = {"salario": 9000.0, "meta": 1000.0, "limites": {}}
+    # "salario" e o valor antigo, unico; "salarios" guarda um valor por mes ("2026-10": 9000.0)
+    padrao = {"salario": 9000.0, "meta": 1000.0, "limites": {}, "salarios": {}}
     try:
         return {**padrao, **(armazenamento.ler_config() or {})}
     except (json.JSONDecodeError, OSError):
@@ -136,6 +137,28 @@ def carregar_config() -> dict:
 
 def salvar_config(cfg: dict) -> None:
     armazenamento.gravar_config(cfg)
+
+
+def chave_mes(ano: int, mes: int) -> str:
+    return f"{ano}-{mes:02d}"
+
+
+def nome_mes(chave: str) -> str:
+    """'2026-10' -> 'Outubro de 2026'"""
+    return f"{MESES[int(chave[5:]) - 1]} de {chave[:4]}"
+
+
+def salario_do_mes(cfg: dict, ano: int, mes: int) -> tuple[float, str | None]:
+    """Salario liquido do mes e a chave do mes de onde ele veio.
+
+    Mes sem salario lancado repete o ultimo mes anterior lancado; sem nenhum, usa o
+    salario unico antigo (origem None).
+    """
+    salarios = cfg.get("salarios", {})
+    anteriores = sorted(k for k in salarios if k <= chave_mes(ano, mes))
+    if anteriores:
+        return float(salarios[anteriores[-1]]), anteriores[-1]
+    return float(cfg["salario"]), None
 
 
 def mes_anterior(ano: int, mes: int) -> tuple[int, int]:
@@ -237,10 +260,9 @@ with st.sidebar:
     mes = MESES.index(mes_nome) + 1
 
     st.markdown("### Seus números")
-    salario = st.number_input(
-        "Salário líquido (R$)", min_value=0.0, value=float(cfg["salario"]), step=100.0,
-        format="%.2f", disabled=not pode_editar,
-        help="O que cai na sua conta por mês, já com os descontos.")
+    salario, origem_salario = salario_do_mes(cfg, ano, mes)
+    st.caption(f"Salário líquido de {mes_nome.lower()}: **{brl(salario)}**. "
+               "Lance ou corrija na aba **Salário**.")
     meta = st.number_input(
         "Meta de economia mensal (R$)", min_value=0.0, value=float(cfg["meta"]), step=100.0,
         format="%.2f", disabled=not pode_editar,
@@ -257,8 +279,8 @@ with st.sidebar:
                 cat, min_value=0.0, value=float(cfg["limites"].get(cat, 0.0)),
                 step=50.0, format="%.2f", key=f"lim_{cat}", disabled=not pode_editar)
 
-    if pode_editar and (salario != cfg["salario"] or meta != cfg["meta"] or limites != cfg["limites"]):
-        cfg = {"salario": salario, "meta": meta, "limites": limites}
+    if pode_editar and (meta != cfg["meta"] or limites != cfg["limites"]):
+        cfg = {**cfg, "meta": meta, "limites": limites}
         salvar_config(cfg)
 
     if not pode_editar:
@@ -379,14 +401,15 @@ if st.session_state.get("aviso_pos"):
 if df.empty or gasto == 0:
     with st.expander("Primeiros passos: como usar o app", expanded=df.empty):
         st.markdown(
-            "1. **Menu lateral → Seus números:** informe seu salário líquido e quanto quer economizar por mês.\n"
+            "1. **Aba Salário:** lance todo mês o salário líquido. **Menu lateral → Seus números:** "
+            "informe quanto quer economizar por mês.\n"
             "2. **Novo gasto:** registre cada despesa com data, categoria e valor.\n"
             "3. **Visão geral:** veja quanto sobrou, para onde foi o dinheiro e se você está no caminho da meta.\n"
             "4. **Orçamento:** acompanhe os limites que definir para cada categoria.\n"
             "5. **Lançamentos:** edite, filtre ou apague registros. Tudo é salvo em `gastos.csv`."
         )
 
-aba_geral, aba_orc, aba_lanc = st.tabs(["Visão geral", "Orçamento", "Lançamentos"])
+aba_geral, aba_orc, aba_lanc, aba_sal = st.tabs(["Visão geral", "Orçamento", "Lançamentos", "Salário"])
 
 # ---- Visao geral ----------------------------------------------------------
 with aba_geral:
@@ -473,7 +496,7 @@ with aba_geral:
         do_ano = df[df["Data"].dt.year == ano]
         mensal = (do_ano.groupby(do_ano["Data"].dt.month)["Valor"].sum()
                   .reindex(range(1, 13), fill_value=0))
-        economia = [(salario - v) if v > 0 else 0 for v in mensal.values]
+        economia = [(salario_do_mes(cfg, ano, m)[0] - v) if v > 0 else 0 for m, v in mensal.items()]
         rotulos = [m[:3] for m in MESES]
         fig2 = go.Figure()
         fig2.add_bar(x=rotulos, y=mensal.values, name="Gasto", marker_color=YELLOW,
@@ -652,3 +675,58 @@ with aba_lanc:
                                data=df.to_csv(index=False).encode(CSV_ENCODING),
                                file_name="gastos.csv", mime="text/csv",
                                help="Cópia de segurança de todos os meses, abre direto no Excel.")
+
+# ---- Salario --------------------------------------------------------------
+with aba_sal:
+    st.markdown("**Salário líquido por mês**")
+    st.caption("Lance todo mês o valor que caiu na conta, já com os descontos. "
+               "Um mês sem salário lançado usa o do último mês lançado.")
+
+    if origem_salario != chave_mes(ano, mes):
+        de_onde = f"o de {nome_mes(origem_salario).lower()}" if origem_salario else "o valor padrão"
+        st.info(f"{mes_nome} de {ano} ainda não tem salário lançado. "
+                f"Por enquanto o app usa {de_onde}: {brl(salario)}.", icon=":material/info:")
+
+    if pode_editar:
+        with st.form("salario_mes"):
+            s1, s2, s3 = st.columns([2, 1, 2])
+            s_mes = s1.selectbox("Mês", MESES, index=mes - 1, key="sal_mes")
+            s_ano = s2.number_input("Ano", min_value=2000, max_value=2100, value=ano, step=1, key="sal_ano")
+            s_valor = s3.number_input("Salário líquido (R$)", min_value=0.0, value=salario, step=100.0,
+                                      format="%.2f", key="sal_valor")
+            gravar_salario = st.form_submit_button("Salvar salário")
+        if gravar_salario:
+            if s_valor <= 0:
+                st.warning("Informe um salário maior que zero.")
+            else:
+                chave = chave_mes(int(s_ano), MESES.index(s_mes) + 1)
+                cfg = {**cfg, "salarios": {**cfg.get("salarios", {}), chave: float(s_valor)}}
+                salvar_config(cfg)
+                st.toast(f"Salário de {nome_mes(chave).lower()}: {brl(s_valor)}", icon=":material/check_circle:")
+                st.rerun()
+
+    salarios = cfg.get("salarios", {})
+    if not salarios:
+        st.caption("Nenhum salário lançado ainda.")
+    else:
+        historico = pd.DataFrame([
+            {"Mês": nome_mes(k), "Salário líquido": v,
+             "Gasto no mês": total_do_mes(df, int(k[:4]), int(k[5:])),
+             "Sobra": v - total_do_mes(df, int(k[:4]), int(k[5:]))}
+            for k, v in sorted(salarios.items(), reverse=True)
+        ])
+        st.dataframe(
+            historico, hide_index=True, width="stretch",
+            column_config={c: st.column_config.NumberColumn(format="R$ %.2f")
+                           for c in ["Salário líquido", "Gasto no mês", "Sobra"]},
+            alt="Salário líquido lançado em cada mês, com o gasto e a sobra do mês",
+        )
+        if pode_editar:
+            with st.expander("Apagar um salário lançado"):
+                apagar = st.selectbox("Mês", sorted(salarios, reverse=True), format_func=nome_mes,
+                                      key="sal_apagar")
+                if st.button("Apagar", icon=":material/delete:"):
+                    cfg = {**cfg, "salarios": {k: v for k, v in salarios.items() if k != apagar}}
+                    salvar_config(cfg)
+                    st.toast(f"Salário de {nome_mes(apagar).lower()} apagado.", icon=":material/delete:")
+                    st.rerun()
